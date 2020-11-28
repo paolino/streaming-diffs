@@ -104,11 +104,11 @@ preemptive s = do
   c <- lift $ do
     c <- newEmptyMVar
     forkIO $ void $ S.effects $ S.mapM 
-      do  \x -> threadDelay 1_000_000 >> putText ("< " <> x) >> putMVar c x 
+      do  \x -> threadDelay 1_000_000 >> putText ("input " <> x) >> putMVar c x 
       do s
     pure c
   forever $ do
     liftIO (readMVar c) >>= S.yield >> liftIO (takeMVar c) >> pure ()
 
 testPreemptive :: Stream (Of ()) IO ()
-testPreemptive = S.mapM (\l -> threadDelay 2_000_000 >> putText ("> " <> l)) $ preemptive $ S.map show $ S.each [1..]
+testPreemptive = S.mapM (\l -> threadDelay 2_000_000 >> putText ("output " <> l)) $ preemptive $ S.map show $ S.each [1..]

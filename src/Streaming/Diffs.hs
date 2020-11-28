@@ -1,7 +1,11 @@
+{-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE NoImplicitPrelude #-}
+{-# LANGUAGE NoMonomorphismRestriction #-}
+{-# LANGUAGE NumericUnderscores #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
-{-# LANGUAGE NoMonomorphismRestriction #-}
 
 module Streaming.Diffs where
 
@@ -12,12 +16,11 @@ import Streaming
 import Streaming.Internal
 import qualified Streaming.Prelude as S
 
-
-breaker
-  :: (Eq t, Monad m)
-  => (a -> t)
-  -> Stream (Of a) m r
-  -> Stream (Of a) m (Either r (t, Stream (Of a) m r))
+breaker ::
+  (Eq t, Monad m) =>
+  (a -> t) ->
+  Stream (Of a) m r ->
+  Stream (Of a) m (Either r (t, Stream (Of a) m r))
 breaker _ (Return r) = Return (Left r)
 breaker tag s = Effect do
   x <- inspect s
@@ -36,10 +39,10 @@ breaker tag s = Effect do
                   then Step $ y :> go t stream'
                   else Return $ Right (t', Step $ y :> stream')
 
-integrate
-  :: (Eq t, Monad m, Monoid b)
-  => Stream (Of (t, b)) m r
-  -> Stream (Of (t, b)) m r
+integrate ::
+  (Eq t, Monad m, Monoid b) =>
+  Stream (Of (t, b)) m r ->
+  Stream (Of (t, b)) m r
 integrate stream = Effect $ do
   b :> mr <- S.foldMap snd $ breaker fst stream
   pure $ case mr of
@@ -71,11 +74,11 @@ lrb2Update (Last (Just x), Last (Just y))
 lrb2Update (Last (Just x), _) = Just $ Delete x
 lrb2Update (_, Last (Just y)) = Just $ New y
 
-streamDiffs
-  :: (Monad m, Functor f, Ord t, Monoid (f (LRB a)), Eq a)
-  => Stream (Of (t, f a)) m r
-  -> Stream (Of (t, f a)) m r
-  -> Stream (Of (t, f (Maybe (Update a)))) m (r, r)
+streamDiffs ::
+  (Monad m, Functor f, Ord t, Monoid (f (LRB a)), Eq a) =>
+  Stream (Of (t, f a)) m r ->
+  Stream (Of (t, f a)) m r ->
+  Stream (Of (t, f (Maybe (Update a)))) m (r, r)
 streamDiffs old new =
   S.map (fmap $ fmap lrb2Update) $
     mergeSemigroup (prepare mkL old) (prepare mkR new)
@@ -84,26 +87,28 @@ streamDiffs old new =
 
 data Update v = Update v v | Delete v | New v deriving (Show, Eq)
 
-streamAssocsDiffs
-  :: (Monad m, Ord t, Ord k, Eq v)
-  => Stream (Of (t, (k, v))) m r
-  -> Stream (Of (t, (k, v))) m r
-  -> Stream (Of (t, (k, Update v))) m (r, r)
+streamAssocsDiffs ::
+  (Monad m, Ord t, Ord k, Eq v) =>
+  Stream (Of (t, (k, v))) m r ->
+  Stream (Of (t, (k, v))) m r ->
+  Stream (Of (t, (k, Update v))) m (r, r)
 streamAssocsDiffs s1 s2 =
   S.for
-    do streamDiffs (S.map prepare s1) (S.map prepare s2)
+    do { streamDiffs (S.map prepare s1) (S.map prepare s2) }
     do \(t, q) -> S.catMaybes $ S.each $ (\(k, v) -> (t,) . (k,) <$> v) <$> M.assocs q
   where
     prepare (t, (k, v)) = (t, M.singleton k v)
 
-preemptive :: IO Text -> Stream (Of Text) IO b
-preemptive f = do 
-  c <- lift $ do 
-    c <- newEmptyMVar 
-    forkIO $ forever $ f >>= \x -> putText ("> " <> x) >> putMVar c x >> putText ("< " <> x)
+preemptive :: Stream (Of Text) IO b  -> Stream (Of Text) IO b
+preemptive s = do
+  c <- lift $ do
+    c <- newEmptyMVar
+    forkIO $ void $ S.effects $ S.mapM 
+      do  \x -> threadDelay 1_000_000 >> putText ("< " <> x) >> putMVar c x 
+      do s
     pure c
-  forever $ do 
-    liftIO (takeMVar c) >>= S.yield
+  forever $ do
+    liftIO (readMVar c) >>= S.yield >> liftIO (takeMVar c) >> pure ()
 
-testPreemptive :: Stream (Of ()) IO r
-testPreemptive = S.mapM (\l -> threadDelay 3_000_000 >> putText l)  $ preemptive getLine
+testPreemptive :: Stream (Of ()) IO ()
+testPreemptive = S.mapM (\l -> threadDelay 2_000_000 >> putText ("> " <> l)) $ preemptive $ S.map show $ S.each [1..]

@@ -1,0 +1,7 @@
+cradle:
+  stack:
+    - path: "./src"
+      component: "streaming-diffs:lib"
+
+    - path: "./test"
+      component: "streaming-diffs:test:streaming-diffs-test"
